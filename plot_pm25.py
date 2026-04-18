@@ -102,7 +102,7 @@ pm25_interp = griddata(
     (src_lon, src_lat), src_val,
     (LON2, LAT2), method="linear"
 )
-# Fill any remaining NaN inside land mask with nearest-neighbour
+# Fill any remaining NaN inside land mask with nearest-neighbor
 pm25_nn = griddata(
     (src_lon, src_lat), src_val,
     (LON2, LAT2), method="nearest"
@@ -116,7 +116,7 @@ pm25_smooth = gaussian_filter(pm25_interp, sigma=1.5)
 pm25_plot = np.where(land_mask, pm25_smooth, np.nan)
 
 # ---------------------------------------------------------------------------
-# 3. Colour map – China-style rainbow colour bar
+# 3. Color map – China-style rainbow color bar
 # ---------------------------------------------------------------------------
 VMIN, VMAX = 0, 80   # μg/m³ – same axis range as the reference China map
 
@@ -245,7 +245,7 @@ ax.yaxis.set_major_formatter(ticker.FuncFormatter(fmt_lat))
 for spine in ax.spines.values():
     spine.set_linewidth(0.8)
 
-# --- Colour bar (horizontal, below map – matching reference style) ---
+# --- Color bar (horizontal, below map – matching reference style) ---
 cbar = fig.colorbar(
     mesh, ax=ax,
     orientation="horizontal",
