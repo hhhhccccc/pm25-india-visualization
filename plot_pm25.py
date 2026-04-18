@@ -11,6 +11,8 @@ Output: pm25_india_feb_mar_2023.png
 
 import os
 import warnings
+import colorsys
+import urllib.request
 
 import numpy as np
 import matplotlib
@@ -115,50 +117,62 @@ pm25_smooth = gaussian_filter(pm25_interp, sigma=1.5)
 pm25_plot = np.where(land_mask, pm25_smooth, np.nan)
 
 # ---------------------------------------------------------------------------
-# 3. Smooth rainbow colour map  blue → cyan → green → yellow → orange → red
-#    (matches reference China PM2.5 style – fully continuous, no hard steps)
+# 3. Colour map – exact HSV rainbow blue → cyan → green → yellow → orange → red
+#    Matches the China reference PM2.5 map colour bar (hue 240° → 0°)
 # ---------------------------------------------------------------------------
-VMIN, VMAX = 0, 120   # μg/m³ – covers the India Feb–Mar data range
+VMIN, VMAX = 0, 80   # μg/m³ – same axis range as the reference China map
 
-# Control points sampled from the reference map palette
-_cmap_colors = [
-    (0.00, "#0000cc"),   # deep blue  (lowest)
-    (0.10, "#0060ff"),   # blue
-    (0.22, "#00b0ff"),   # sky-blue
-    (0.33, "#00e8c8"),   # cyan-teal
-    (0.44, "#00e040"),   # green
-    (0.55, "#a0e800"),   # yellow-green
-    (0.65, "#ffee00"),   # yellow
-    (0.75, "#ffa000"),   # orange
-    (0.87, "#ff2800"),   # red-orange
-    (1.00, "#b00000"),   # dark red   (highest)
-]
-cmap = mcolors.LinearSegmentedColormap.from_list(
-    "pm25_rainbow", _cmap_colors
-)
+# Build continuous rainbow from hue=240° (blue) to hue=0° (red) in HSV space
+_n = 256
+_hues = np.linspace(240 / 360, 0 / 360, _n)
+_rgb = [colorsys.hsv_to_rgb(h, 1.0, 1.0) for h in _hues]
+cmap = mcolors.LinearSegmentedColormap.from_list("china_pm25_rainbow", _rgb)
 norm = mcolors.Normalize(vmin=VMIN, vmax=VMAX)
 
 # ---------------------------------------------------------------------------
-# 4. Load district boundaries (GeoJSON) – graceful fallback
+# 4. Load district boundaries (GeoJSON) – download from public source if local
+#    file is a placeholder (< 10 kB); cache to /tmp to avoid repeated downloads
 # ---------------------------------------------------------------------------
+# Public source: GADM-based India district polygons (594 districts, WGS-84)
+_DISTRICT_URL   = ("https://raw.githubusercontent.com/geohacker/india/"
+                   "master/district/india_district.geojson")
+_DISTRICT_CACHE = "/tmp/india_districts_cache.geojson"
+
 india_gdf   = None
 use_geojson = False
 
-if os.path.isfile(GEOJSON):
-    try:
-        # Check if it is a real GeoJSON (not a placeholder)
-        with open(GEOJSON, "r", encoding="utf-8") as fh:
-            first_chars = fh.read(20).strip()
-        if first_chars.startswith("{") or first_chars.startswith("["):
-            india_gdf = gpd.read_file(GEOJSON)
-            use_geojson = True
-            print(f"Loaded GeoJSON: {len(india_gdf)} districts, CRS={india_gdf.crs}")
-        else:
-            print("GeoJSON file appears to be a placeholder – using data-derived boundary.")
-    except Exception as exc:
-        print(f"Could not read GeoJSON ({exc}) – using data-derived boundary.")
+def _is_real_geojson(path):
+    """Return True only if the file looks like a real GeoJSON (≥ 10 kB, starts with '{')."""
+    if not os.path.isfile(path):
+        return False
+    if os.path.getsize(path) < 10_000:
+        return False
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        return fh.read(20).strip().startswith("{")
+
+# Determine which path to use
+_geojson_path = None
+if _is_real_geojson(GEOJSON):
+    _geojson_path = GEOJSON
+elif _is_real_geojson(_DISTRICT_CACHE):
+    print("Using cached district GeoJSON.")
+    _geojson_path = _DISTRICT_CACHE
 else:
-    print("GeoJSON not found – using data-derived boundary.")
+    print("Downloading India district boundaries …")
+    try:
+        urllib.request.urlretrieve(_DISTRICT_URL, _DISTRICT_CACHE)
+        print(f"  Saved to {_DISTRICT_CACHE}")
+        _geojson_path = _DISTRICT_CACHE
+    except Exception as exc:
+        print(f"  Download failed ({exc}) – will use data-derived boundary.")
+
+if _geojson_path:
+    try:
+        india_gdf = gpd.read_file(_geojson_path)
+        use_geojson = True
+        print(f"Loaded district GeoJSON: {len(india_gdf)} districts, CRS={india_gdf.crs}")
+    except Exception as exc:
+        print(f"Could not read district GeoJSON ({exc}) – using data-derived boundary.")
 
 # ---------------------------------------------------------------------------
 # 5. Plot
@@ -247,8 +261,8 @@ cbar = fig.colorbar(
 )
 cbar.set_label("春季平均 PM2.5 (μg/m³)", fontsize=11, labelpad=6)
 cbar.ax.tick_params(labelsize=9)
-# Evenly spaced ticks across the full range
-cbar_ticks = list(range(0, VMAX + 1, 20))
+# Ticks at 0, 10, 20, … 80 – exactly as in the reference China map
+cbar_ticks = list(range(0, VMAX + 1, 10))
 cbar.set_ticks(cbar_ticks)
 cbar.ax.set_xticklabels([str(v) for v in cbar_ticks])
 
