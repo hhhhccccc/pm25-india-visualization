@@ -125,6 +125,14 @@ VMIN, VMAX = 0, 80   # μg/m³ – same axis range as the reference China map
 cmap = plt.get_cmap("jet")
 norm = mcolors.Normalize(vmin=VMIN, vmax=VMAX)
 
+# Boundary style for city/district-level linework
+BOUNDARY_LINEWIDTH = 0.10
+BOUNDARY_COLOR = "#222222"
+BOUNDARY_ALPHA = 0.70
+# Geometry simplification tolerance in degrees (~2 km) to reduce visual clutter
+# while preserving city-level boundary shapes at this map scale.
+BOUNDARY_SIMPLIFY_TOL = 0.02
+
 # ---------------------------------------------------------------------------
 # 4. Load district boundaries (GeoJSON) – download from public source if local
 #    file is a placeholder (< 10 kB); cache to /tmp to avoid repeated downloads
@@ -216,16 +224,16 @@ if use_geojson and india_gdf is not None:
     # city-level boundaries.
     try:
         linework = india_gdf.boundary.union_all()
-        linework = linework.simplify(0.02, preserve_topology=True)
+        linework = linework.simplify(BOUNDARY_SIMPLIFY_TOL, preserve_topology=True)
         gpd.GeoSeries([linework], crs="EPSG:4326").plot(
-            ax=ax, linewidth=0.10, color="#222222", alpha=0.70, zorder=4
+            ax=ax, linewidth=BOUNDARY_LINEWIDTH, color=BOUNDARY_COLOR, alpha=BOUNDARY_ALPHA, zorder=4
         )
     except AttributeError:
         # older geopandas compatibility
         linework = india_gdf.boundary.unary_union
-        linework = linework.simplify(0.02, preserve_topology=True)
+        linework = linework.simplify(BOUNDARY_SIMPLIFY_TOL, preserve_topology=True)
         gpd.GeoSeries([linework], crs="EPSG:4326").plot(
-            ax=ax, linewidth=0.10, color="#222222", alpha=0.70, zorder=4
+            ax=ax, linewidth=BOUNDARY_LINEWIDTH, color=BOUNDARY_COLOR, alpha=BOUNDARY_ALPHA, zorder=4
         )
 else:
     # Draw boundary derived from the land mask using contour at 0.5
