@@ -212,16 +212,20 @@ mesh = ax.pcolormesh(
 if use_geojson and india_gdf is not None:
     # Draw only admin-2 (city/county-level) boundaries as a single merged layer
     # to avoid mixed thick/thin appearance caused by overlapping segments.
+    # Simplify linework slightly to reduce visual clutter while preserving
+    # city-level boundaries.
     try:
         linework = india_gdf.boundary.union_all()
+        linework = linework.simplify(0.02, preserve_topology=True)
         gpd.GeoSeries([linework], crs="EPSG:4326").plot(
-            ax=ax, linewidth=0.18, color="#222222", zorder=4
+            ax=ax, linewidth=0.10, color="#222222", alpha=0.70, zorder=4
         )
     except AttributeError:
         # older geopandas compatibility
         linework = india_gdf.boundary.unary_union
+        linework = linework.simplify(0.02, preserve_topology=True)
         gpd.GeoSeries([linework], crs="EPSG:4326").plot(
-            ax=ax, linewidth=0.18, color="#222222", zorder=4
+            ax=ax, linewidth=0.10, color="#222222", alpha=0.70, zorder=4
         )
 else:
     # Draw boundary derived from the land mask using contour at 0.5
