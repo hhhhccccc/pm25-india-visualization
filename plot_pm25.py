@@ -17,15 +17,30 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-import matplotlib.patches as mpatches
 import matplotlib.ticker as ticker
 from matplotlib.ticker import MultipleLocator
+import matplotlib.font_manager as fm
 import xarray as xr
 import geopandas as gpd
 from scipy.ndimage import gaussian_filter
 from scipy.interpolate import griddata
 
 warnings.filterwarnings("ignore")
+
+# ---------------------------------------------------------------------------
+# Chinese font setup – use Noto Sans CJK if available, else fall back to
+# the default sans-serif (Chinese characters may render as boxes in that case)
+# ---------------------------------------------------------------------------
+_cjk_candidates = ["Noto Sans CJK SC", "Noto Sans CJK JP", "Noto Serif CJK SC",
+                    "Noto Serif CJK JP", "WenQuanYi Zen Hei", "SimHei", "Microsoft YaHei"]
+_available = {f.name for f in fm.fontManager.ttflist}
+_cjk_font = next((f for f in _cjk_candidates if f in _available), None)
+if _cjk_font:
+    plt.rcParams["font.family"] = _cjk_font
+    print(f"Using CJK font: {_cjk_font}")
+else:
+    print("No CJK font found – Chinese characters may not render correctly.")
+plt.rcParams["axes.unicode_minus"] = False
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -100,19 +115,28 @@ pm25_smooth = gaussian_filter(pm25_interp, sigma=1.5)
 pm25_plot = np.where(land_mask, pm25_smooth, np.nan)
 
 # ---------------------------------------------------------------------------
-# 3. Custom colour map  blue → green → yellow → red
+# 3. Smooth rainbow colour map  blue → cyan → green → yellow → orange → red
+#    (matches reference China PM2.5 style – fully continuous, no hard steps)
 # ---------------------------------------------------------------------------
-LEVELS   = [0, 10, 30, 60, 100, 150]
-COLOURS  = ["#1a80ff", "#00cc44", "#ffdd00", "#ff4400", "#990000"]
+VMIN, VMAX = 0, 120   # μg/m³ – covers the India Feb–Mar data range
 
+# Control points sampled from the reference map palette
+_cmap_colors = [
+    (0.00, "#0000cc"),   # deep blue  (lowest)
+    (0.10, "#0060ff"),   # blue
+    (0.22, "#00b0ff"),   # sky-blue
+    (0.33, "#00e8c8"),   # cyan-teal
+    (0.44, "#00e040"),   # green
+    (0.55, "#a0e800"),   # yellow-green
+    (0.65, "#ffee00"),   # yellow
+    (0.75, "#ffa000"),   # orange
+    (0.87, "#ff2800"),   # red-orange
+    (1.00, "#b00000"),   # dark red   (highest)
+]
 cmap = mcolors.LinearSegmentedColormap.from_list(
-    "pm25",
-    list(zip(
-        np.linspace(0, 1, len(COLOURS)),
-        COLOURS
-    ))
+    "pm25_rainbow", _cmap_colors
 )
-norm = mcolors.BoundaryNorm(LEVELS, cmap.N)
+norm = mcolors.Normalize(vmin=VMIN, vmax=VMAX)
 
 # ---------------------------------------------------------------------------
 # 4. Load district boundaries (GeoJSON) – graceful fallback
@@ -141,23 +165,15 @@ else:
 # ---------------------------------------------------------------------------
 print("Rendering map …")
 
-fig, ax = plt.subplots(figsize=(10, 10), dpi=300)
-fig.patch.set_facecolor("#f8f8f8")
-ax.set_facecolor("#b0d4f0")          # ocean colour
+fig, ax = plt.subplots(figsize=(12, 9), dpi=300)
+fig.patch.set_facecolor("white")
+ax.set_facecolor("#ddeeff")          # light ocean colour
 
 # --- PM2.5 heatmap ---
 mesh = ax.pcolormesh(
     LON2, LAT2, pm25_plot,
     cmap=cmap, norm=norm,
     shading="auto", zorder=2
-)
-
-# --- Contour lines for extra visual structure ---
-contour_levels = [10, 30, 60, 100]
-cs = ax.contour(
-    LON2, LAT2, pm25_plot,
-    levels=contour_levels,
-    colors="white", linewidths=0.4, alpha=0.5, zorder=3
 )
 
 # --- Boundaries ---
@@ -221,41 +237,26 @@ ax.yaxis.set_major_formatter(ticker.FuncFormatter(fmt_lat))
 for spine in ax.spines.values():
     spine.set_linewidth(0.8)
 
-# --- Colour bar ---
+# --- Colour bar (horizontal, below map – matching reference style) ---
 cbar = fig.colorbar(
     mesh, ax=ax,
-    orientation="vertical",
-    fraction=0.025, pad=0.02,
+    orientation="horizontal",
+    fraction=0.04, pad=0.08,
     extend="max",
-    ticks=LEVELS,
+    aspect=40,
 )
-cbar.set_label("PM₂.₅ Concentration (μg/m³)", fontsize=10, labelpad=8)
+cbar.set_label("春季平均 PM2.5 (μg/m³)", fontsize=11, labelpad=6)
 cbar.ax.tick_params(labelsize=9)
-cbar.ax.set_yticklabels([str(v) for v in LEVELS])
-
-# Custom legend patches
-legend_items = [
-    mpatches.Patch(color=COLOURS[0], label="0–10 μg/m³  (Low)"),
-    mpatches.Patch(color=COLOURS[1], label="10–30 μg/m³ (Moderate-Low)"),
-    mpatches.Patch(color=COLOURS[2], label="30–60 μg/m³ (Moderate-High)"),
-    mpatches.Patch(color=COLOURS[3], label="60–100 μg/m³ (High)"),
-    mpatches.Patch(color=COLOURS[4], label=">100 μg/m³  (Very High)"),
-]
-ax.legend(
-    handles=legend_items,
-    loc="lower left",
-    fontsize=7.5,
-    framealpha=0.85,
-    edgecolor="gray",
-    title="PM₂.₅ Level",
-    title_fontsize=8,
-)
+# Evenly spaced ticks across the full range
+cbar_ticks = list(range(0, VMAX + 1, 20))
+cbar.set_ticks(cbar_ticks)
+cbar.ax.set_xticklabels([str(v) for v in cbar_ticks])
 
 # --- Title ---
 ax.set_title(
-    "India PM₂.₅ Concentration Spatial Distribution\n"
-    "February – March 2023 (Monthly Average)",
-    fontsize=13, fontweight="bold", pad=12
+    "2023年春季印度 PM2.5 空间分布图\n"
+    "(February – March 2023 Average)",
+    fontsize=14, fontweight="bold", pad=14
 )
 
 # --- Annotation ---
