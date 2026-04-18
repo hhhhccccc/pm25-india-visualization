@@ -11,7 +11,6 @@ Output: pm25_india_feb_mar_2023.png
 
 import os
 import warnings
-import colorsys
 import urllib.request
 
 import numpy as np
@@ -117,16 +116,12 @@ pm25_smooth = gaussian_filter(pm25_interp, sigma=1.5)
 pm25_plot = np.where(land_mask, pm25_smooth, np.nan)
 
 # ---------------------------------------------------------------------------
-# 3. Colour map – exact HSV rainbow blue → cyan → green → yellow → orange → red
-#    Matches the China reference PM2.5 map colour bar (hue 240° → 0°)
+# 3. Colour map – China-style rainbow colour bar
 # ---------------------------------------------------------------------------
 VMIN, VMAX = 0, 80   # μg/m³ – same axis range as the reference China map
 
-# Build continuous rainbow from hue=240° (blue) to hue=0° (red) in HSV space
-_n = 256
-_hues = np.linspace(240 / 360, 0 / 360, _n)
-_rgb = [colorsys.hsv_to_rgb(h, 1.0, 1.0) for h in _hues]
-cmap = mcolors.LinearSegmentedColormap.from_list("china_pm25_rainbow", _rgb)
+# Use classic China-map rainbow (blue→cyan→green→yellow→orange→red)
+cmap = plt.get_cmap("jet")
 norm = mcolors.Normalize(vmin=VMIN, vmax=VMAX)
 
 # ---------------------------------------------------------------------------
@@ -195,20 +190,19 @@ if use_geojson and india_gdf is not None:
     # Reproject to WGS-84 if needed
     if india_gdf.crs and india_gdf.crs.to_epsg() != 4326:
         india_gdf = india_gdf.to_crs("EPSG:4326")
-    india_gdf.boundary.plot(
-        ax=ax, linewidth=0.4, edgecolor="#333333", zorder=4
-    )
-    # Outer country border (union of all districts)
+
+    # Draw only admin-2 (city/county-level) boundaries as a single merged layer
+    # to avoid mixed thick/thin appearance caused by overlapping segments.
     try:
-        outer = india_gdf.union_all()
-        gpd.GeoSeries([outer]).boundary.plot(
-            ax=ax, linewidth=1.2, edgecolor="#111111", zorder=5
+        linework = india_gdf.boundary.union_all()
+        gpd.GeoSeries([linework], crs="EPSG:4326").plot(
+            ax=ax, linewidth=0.18, color="#222222", zorder=4
         )
     except AttributeError:
-        # older geopandas
-        outer = india_gdf.geometry.unary_union
-        gpd.GeoSeries([outer]).boundary.plot(
-            ax=ax, linewidth=1.2, edgecolor="#111111", zorder=5
+        # older geopandas compatibility
+        linework = india_gdf.boundary.unary_union
+        gpd.GeoSeries([linework], crs="EPSG:4326").plot(
+            ax=ax, linewidth=0.18, color="#222222", zorder=4
         )
 else:
     # Draw boundary derived from the land mask using contour at 0.5
