@@ -25,6 +25,7 @@ import xarray as xr
 import geopandas as gpd
 from scipy.ndimage import gaussian_filter
 from scipy.interpolate import griddata
+from shapely import contains_xy
 
 warnings.filterwarnings("ignore")
 
@@ -112,8 +113,8 @@ pm25_interp = np.where(np.isfinite(pm25_interp), pm25_interp, pm25_nn)
 # Apply light Gaussian smoothing for visual appeal
 pm25_smooth = gaussian_filter(pm25_interp, sigma=1.5)
 
-# Restore NaN outside the land mask
-pm25_plot = np.where(land_mask, pm25_smooth, np.nan)
+# Keep smoothed field; final masking will be applied after boundary GeoJSON is loaded
+pm25_plot = pm25_smooth.copy()
 
 # ---------------------------------------------------------------------------
 # 3. Color map – China-style rainbow color bar
@@ -164,10 +165,32 @@ else:
 if _geojson_path:
     try:
         india_gdf = gpd.read_file(_geojson_path)
+        if india_gdf.crs and india_gdf.crs.to_epsg() != 4326:
+            india_gdf = india_gdf.to_crs("EPSG:4326")
         use_geojson = True
         print(f"Loaded district GeoJSON: {len(india_gdf)} districts, CRS={india_gdf.crs}")
     except Exception as exc:
         print(f"Could not read district GeoJSON ({exc}) – using data-derived boundary.")
+
+# Build final plot mask from country geometry when available to avoid
+# white gaps between raster color and boundary line.
+if use_geojson and india_gdf is not None:
+    try:
+        country_geom = india_gdf.union_all()
+    except AttributeError:
+        country_geom = india_gdf.geometry.unary_union
+
+    # Expand by ~half grid cell so colored raster reaches the plotted boundary.
+    _dlat = float(np.median(np.diff(lat)))
+    _dlon = float(np.median(np.diff(lon)))
+    _buffer = 0.5 * np.hypot(_dlat, _dlon)
+    country_geom = country_geom.buffer(_buffer)
+
+    country_mask = contains_xy(country_geom, LON2, LAT2)
+else:
+    country_mask = land_mask
+
+pm25_plot = np.where(country_mask, pm25_plot, np.nan)
 
 # ---------------------------------------------------------------------------
 # 5. Plot
@@ -187,10 +210,6 @@ mesh = ax.pcolormesh(
 
 # --- Boundaries ---
 if use_geojson and india_gdf is not None:
-    # Reproject to WGS-84 if needed
-    if india_gdf.crs and india_gdf.crs.to_epsg() != 4326:
-        india_gdf = india_gdf.to_crs("EPSG:4326")
-
     # Draw only admin-2 (city/county-level) boundaries as a single merged layer
     # to avoid mixed thick/thin appearance caused by overlapping segments.
     try:
