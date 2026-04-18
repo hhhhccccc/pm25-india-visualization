@@ -272,7 +272,7 @@ cbar = fig.colorbar(
     extend="max",
     aspect=40,
 )
-cbar.set_label("春季平均 PM2.5 (μg/m³)", fontsize=11, labelpad=6)
+cbar.set_label("2–3月平均 PM2.5 (μg/m³)", fontsize=11, labelpad=6)
 cbar.ax.tick_params(labelsize=9)
 # Ticks at 0, 10, 20, … 80 – exactly as in the reference China map
 cbar_ticks = list(range(0, VMAX + 1, 10))
@@ -281,7 +281,7 @@ cbar.ax.set_xticklabels([str(v) for v in cbar_ticks])
 
 # --- Title ---
 ax.set_title(
-    "2023年春季印度 PM2.5 空间分布图\n"
+    "2023年2–3月印度 PM2.5 空间分布图\n"
     "(February – March 2023 Average)",
     fontsize=14, fontweight="bold", pad=14
 )
