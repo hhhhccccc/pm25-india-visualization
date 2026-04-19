@@ -122,15 +122,25 @@ pm25_plot = pm25_smooth.copy()
 # ---------------------------------------------------------------------------
 VMIN, VMID, VMAX = 0, 80, 120   # μg/m³
 
-# Keep 0–80 exactly on the original jet mapping, then extend 80–120 with darker reds.
-_jet = plt.get_cmap("jet")
-_vals_0_80 = np.arange(VMIN, VMID + 1, 1, dtype=float)
+# Explicit 0–80 reference palette (blue→cyan→green→yellow→orange→red).
+# This keeps the 0 color aligned with the user's reference bar.
+_vals_0_80 = np.array([0, 10, 20, 30, 40, 50, 60, 70, 80], dtype=float)
 _pos_0_80 = _vals_0_80 / VMAX
-_cols_0_80 = [_jet(v / VMID) for v in _vals_0_80]
+_cols_0_80 = [
+    "#2f5fff",  # 0
+    "#35b6f0",  # 10
+    "#34c8b3",  # 20
+    "#5ae05e",  # 30
+    "#9ceb48",  # 40
+    "#f1e34a",  # 50
+    "#f9b24a",  # 60
+    "#ff7a4a",  # 70
+    "#ff5a62",  # 80
+]
 
 _vals_hi = np.array([90, 100, 110, 120], dtype=float)
 _pos_hi = _vals_hi / VMAX
-_cols_hi = ["#c00000", "#8b0000", "#5a0000", "#2d0000"]
+_cols_hi = ["#d33a3a", "#a31f1f", "#6f1010", "#3f0606"]
 
 cmap = mcolors.LinearSegmentedColormap.from_list(
     "pm25_extended",
