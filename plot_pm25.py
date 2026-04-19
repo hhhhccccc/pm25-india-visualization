@@ -141,24 +141,25 @@ BOUNDARY_SIMPLIFY_TOL = 0.02
 _BOUNDARY_URL   = ("https://raw.githubusercontent.com/geohacker/india/"
                    "master/state/india_state.geojson")
 _BOUNDARY_CACHE = "/tmp/india_admin1_cache.geojson"
+MIN_GEOJSON_SIZE_BYTES = 10_000
 
 india_gdf   = None
 use_geojson = False
 
-def _is_real_geojson(path):
+def _is_valid_geojson_file(path):
     """Return True only if the file looks like a real GeoJSON (≥ 10 kB, starts with '{')."""
     if not os.path.isfile(path):
         return False
-    if os.path.getsize(path) < 10_000:
+    if os.path.getsize(path) < MIN_GEOJSON_SIZE_BYTES:
         return False
     with open(path, "r", encoding="utf-8", errors="replace") as fh:
         return fh.read(20).strip().startswith("{")
 
 # Determine which path to use
 _geojson_path = None
-if _is_real_geojson(GEOJSON):
+if _is_valid_geojson_file(GEOJSON):
     _geojson_path = GEOJSON
-elif _is_real_geojson(_BOUNDARY_CACHE):
+elif _is_valid_geojson_file(_BOUNDARY_CACHE):
     print("Using cached admin-1 GeoJSON.")
     _geojson_path = _BOUNDARY_CACHE
 else:
