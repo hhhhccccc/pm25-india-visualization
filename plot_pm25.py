@@ -118,12 +118,24 @@ pm25_smooth = gaussian_filter(pm25_interp, sigma=1.5)
 pm25_plot = pm25_smooth.copy()
 
 # ---------------------------------------------------------------------------
-# 3. Color map – China-style rainbow color bar
+# 3. Color map – preserve reference 0–80 colors, extend to >100
 # ---------------------------------------------------------------------------
-VMIN, VMAX = 0, 80   # μg/m³ – same axis range as the reference China map
+VMIN, VMID, VMAX = 0, 80, 120   # μg/m³
 
-# Use classic China-map rainbow (blue→cyan→green→yellow→orange→red)
-cmap = plt.get_cmap("jet")
+# Keep 0–80 exactly on the original jet mapping, then extend 80–120 with darker reds.
+_jet = plt.get_cmap("jet")
+_vals_0_80 = np.arange(VMIN, VMID + 1, 1, dtype=float)
+_pos_0_80 = _vals_0_80 / VMAX
+_cols_0_80 = [_jet(v / VMID) for v in _vals_0_80]
+
+_vals_hi = np.array([90, 100, 110, 120], dtype=float)
+_pos_hi = _vals_hi / VMAX
+_cols_hi = ["#c00000", "#8b0000", "#5a0000", "#2d0000"]
+
+cmap = mcolors.LinearSegmentedColormap.from_list(
+    "pm25_extended",
+    list(zip(np.concatenate([_pos_0_80, _pos_hi]), _cols_0_80 + _cols_hi))
+)
 norm = mcolors.Normalize(vmin=VMIN, vmax=VMAX)
 
 # Boundary style for admin-1 (state-level) linework
@@ -318,7 +330,7 @@ cbar = fig.colorbar(
 )
 cbar.set_label("2–3月平均 PM2.5 (μg/m³)", fontsize=11, labelpad=6)
 cbar.ax.tick_params(labelsize=9)
-# Ticks at 0, 10, 20, … 80 – exactly as in the reference China map
+# Ticks at 0, 10, 20, … 120; 0–80 keeps reference colors unchanged
 cbar_ticks = list(range(0, VMAX + 1, 10))
 cbar.set_ticks(cbar_ticks)
 cbar.ax.set_xticklabels([str(v) for v in cbar_ticks])
