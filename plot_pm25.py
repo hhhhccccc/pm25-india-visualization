@@ -338,7 +338,7 @@ cbar = fig.colorbar(
 )
 cbar.set_label("2–3月平均 PM2.5 (μg/m³)", fontsize=11, labelpad=6)
 cbar.ax.tick_params(labelsize=9)
-# Ticks at 0, 10, 20, … 100; 0–80 keeps reference colors unchanged
+# Ticks at 0, 10, 20, … 100; the 0–80 segment follows the requested palette
 cbar_ticks = list(range(0, VMAX + 1, 10))
 cbar.set_ticks(cbar_ticks)
 cbar.ax.set_xticklabels([str(v) for v in cbar_ticks])
