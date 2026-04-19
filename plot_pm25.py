@@ -126,6 +126,7 @@ cmap = plt.get_cmap("jet")
 norm = mcolors.Normalize(vmin=VMIN, vmax=VMAX)
 
 # Boundary style for admin-1 (state-level) linework
+# Slightly stronger stroke to keep boundaries readable over high-saturation colors.
 BOUNDARY_LINEWIDTH = 0.45
 BOUNDARY_COLOR = "#111111"
 BOUNDARY_ALPHA = 0.95
@@ -141,6 +142,7 @@ BOUNDARY_SIMPLIFY_TOL = 0.01
 _BOUNDARY_URL   = ("https://raw.githubusercontent.com/geohacker/india/"
                    "master/state/india_state.geojson")
 _BOUNDARY_CACHE = "/tmp/india_admin1_cache.geojson"
+# Treat tiny files as placeholders/corrupt downloads; real boundary GeoJSON is much larger.
 MIN_GEOJSON_SIZE_BYTES = 10_000
 
 india_gdf   = None
@@ -208,7 +210,7 @@ ax.set_facecolor("#ddeeff")          # light ocean colour
 mesh = ax.pcolormesh(
     LON2, LAT2, pm25_plot,
     cmap=cmap, norm=norm,
-    shading="gouraud", antialiased=True, zorder=2
+    shading="gouraud", zorder=2
 )
 
 # --- Boundaries ---
