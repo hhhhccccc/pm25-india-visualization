@@ -236,10 +236,14 @@ fig.patch.set_facecolor("white")
 ax.set_facecolor("#ddeeff")          # light ocean colour
 
 # --- PM2.5 heatmap ---
-mesh = ax.pcolormesh(
-    LON2, LAT2, pm25_plot,
+mesh = ax.imshow(
+    pm25_plot,
+    origin="lower",
+    extent=[lon.min(), lon.max(), lat.min(), lat.max()],
     cmap=cmap, norm=norm,
-    shading="gouraud", zorder=2
+    interpolation="bicubic",
+    zorder=2,
+    aspect="auto",
 )
 if country_geom is not None:
     country_path = _geometry_to_path(country_geom)
