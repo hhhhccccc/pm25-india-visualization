@@ -1,0 +1,359 @@
+"""
+PM2.5 Spatial Distribution Heatmap for India (February–March 2023)
+===================================================================
+Reads two monthly NetCDF files, computes the Feb–Mar average, applies
+linear and nearest-neighbor spatial interpolation to fill minor gaps,
+and produces a publication-quality PNG with higher-level India
+administrative boundaries overlaid.
+
+Output: pm25_india_feb_mar_2023.png
+"""
+
+import os
+import warnings
+import urllib.request
+
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import matplotlib.ticker as ticker
+from matplotlib.path import Path
+from matplotlib.ticker import MultipleLocator
+import matplotlib.font_manager as fm
+import xarray as xr
+import geopandas as gpd
+from scipy.ndimage import gaussian_filter
+from scipy.interpolate import griddata
+from shapely.geometry import Polygon, MultiPolygon, GeometryCollection
+
+warnings.filterwarnings("ignore")
+
+# ---------------------------------------------------------------------------
+# Chinese font setup – use Noto Sans CJK if available, else fall back to
+# the default sans-serif (Chinese characters may render as boxes in that case)
+# ---------------------------------------------------------------------------
+_cjk_candidates = ["Noto Sans CJK SC", "Noto Sans CJK JP", "Noto Serif CJK SC",
+                    "Noto Serif CJK JP", "WenQuanYi Zen Hei", "SimHei", "Microsoft YaHei"]
+_available = {f.name for f in fm.fontManager.ttflist}
+_cjk_font = next((f for f in _cjk_candidates if f in _available), None)
+if _cjk_font:
+    plt.rcParams["font.family"] = _cjk_font
+    print(f"Using CJK font: {_cjk_font}")
+else:
+    print("No CJK font found – Chinese characters may not render correctly.")
+plt.rcParams["axes.unicode_minus"] = False
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+NC_FEB = os.path.join(SCRIPT_DIR, "India_202302-202302.nc")
+NC_MAR = os.path.join(SCRIPT_DIR, "India_202303-202303.nc")
+GEOJSON = os.path.join(SCRIPT_DIR, "INDIA_INDIA_STATES.geojson")
+OUTPUT  = os.path.join(SCRIPT_DIR, "pm25_india_feb_mar_2023.png")
+
+# ---------------------------------------------------------------------------
+# 1. Read & average NetCDF data
+# ---------------------------------------------------------------------------
+print("Reading NetCDF files …")
+ds_feb = xr.open_dataset(NC_FEB)
+ds_mar = xr.open_dataset(NC_MAR)
+
+pm25_feb = ds_feb["PM25"].values   # shape (lat, lon)
+pm25_mar = ds_mar["PM25"].values
+
+lat = ds_feb["lat"].values          # 1-D, ascending (6.8 … 35.4)
+lon = ds_feb["lon"].values          # 1-D, ascending (68.2 … 97.2)
+
+ds_feb.close()
+ds_mar.close()
+
+# Replace NaN / masked fill values
+pm25_feb = np.where(np.isfinite(pm25_feb) & (pm25_feb > 0), pm25_feb, np.nan)
+pm25_mar = np.where(np.isfinite(pm25_mar) & (pm25_mar > 0), pm25_mar, np.nan)
+
+# Average over the two months (NaN-safe)
+pm25_avg = np.nanmean(np.stack([pm25_feb, pm25_mar], axis=0), axis=0)
+
+# Build a land mask: True where at least one month has valid data
+land_mask = np.isfinite(pm25_avg)
+
+print(f"  Grid size : {lat.size} × {lon.size}")
+print(f"  Valid cells: {land_mask.sum():,}")
+print(f"  PM2.5 range: {np.nanmin(pm25_avg):.1f} – {np.nanmax(pm25_avg):.1f} μg/m³")
+print(f"  PM2.5 mean : {np.nanmean(pm25_avg):.1f} μg/m³")
+
+# ---------------------------------------------------------------------------
+# 2. Spatial interpolation (linear + nearest-neighbor) to fill isolated NaN gaps on land
+# ---------------------------------------------------------------------------
+print("Applying spatial interpolation …")
+
+LON2, LAT2 = np.meshgrid(lon, lat)
+
+# Collect valid (source) points
+src_mask = land_mask & np.isfinite(pm25_avg)
+src_lon  = LON2[src_mask]
+src_lat  = LAT2[src_mask]
+src_val  = pm25_avg[src_mask]
+
+# Interpolate onto the full grid using linear then nearest fallback
+pm25_interp = griddata(
+    (src_lon, src_lat), src_val,
+    (LON2, LAT2), method="linear"
+)
+# Fill any remaining NaN inside land mask with nearest-neighbor
+pm25_nn = griddata(
+    (src_lon, src_lat), src_val,
+    (LON2, LAT2), method="nearest"
+)
+pm25_interp = np.where(np.isfinite(pm25_interp), pm25_interp, pm25_nn)
+
+# Apply light Gaussian smoothing for visual appeal
+pm25_smooth = gaussian_filter(pm25_interp, sigma=1.5)
+
+# Keep smoothed field; final masking will be applied after boundary GeoJSON is loaded
+pm25_plot = pm25_smooth.copy()
+
+# ---------------------------------------------------------------------------
+# 3. Color map – use requested 0–80 colors, extend to 100
+# ---------------------------------------------------------------------------
+VMIN, VMID, VMAX = 0, 80, 100   # μg/m³
+
+# Explicit 0–80 reference palette provided by the user.
+_vals_0_80 = np.linspace(VMIN, VMID, 8, dtype=float)
+_pos_0_80 = _vals_0_80 / VMAX
+_cols_0_80 = [
+    "#2455ff",
+    "#2fc6ff",
+    "#26d7b3",
+    "#7ef24a",
+    "#fff04a",
+    "#ffb347",
+    "#ff7a45",
+    "#ff5b5b",
+]
+
+_vals_hi = np.array([90, 100], dtype=float)
+_pos_hi = _vals_hi / VMAX
+_cols_hi = ["#cc2f2f", "#8b0000"]
+
+cmap = mcolors.LinearSegmentedColormap.from_list(
+    "pm25_extended",
+    list(zip(np.concatenate([_pos_0_80, _pos_hi]), _cols_0_80 + _cols_hi))
+)
+norm = mcolors.Normalize(vmin=VMIN, vmax=VMAX)
+
+# Boundary style for admin-1 (state-level) linework
+# Slightly stronger stroke to keep boundaries readable over high-saturation colors.
+BOUNDARY_LINEWIDTH = 0.45
+BOUNDARY_COLOR = "#111111"
+BOUNDARY_ALPHA = 0.95
+# Geometry simplification tolerance in degrees (~2 km) to reduce visual clutter
+# while preserving overall boundary shapes at this map scale.
+BOUNDARY_SIMPLIFY_TOL = 0.01
+
+# ---------------------------------------------------------------------------
+# 4. Load higher-level admin boundaries (GeoJSON) – download from public source if local
+#    file is a placeholder (< 10 kB); cache to /tmp to avoid repeated downloads
+# ---------------------------------------------------------------------------
+# Public source: GADM-based India state polygons (admin-1, WGS-84)
+_BOUNDARY_URL   = ("https://raw.githubusercontent.com/geohacker/india/"
+                   "master/state/india_state.geojson")
+_BOUNDARY_CACHE = "/tmp/india_admin1_cache.geojson"
+# Treat tiny files as placeholders/corrupt downloads; real boundary GeoJSON is much larger.
+MIN_GEOJSON_SIZE_BYTES = 10_000
+
+india_gdf   = None
+use_geojson = False
+country_geom = None
+
+def _is_valid_geojson_file(path):
+    """Return True only if the file looks like a real GeoJSON (≥ 10 kB, starts with '{')."""
+    if not os.path.isfile(path):
+        return False
+    if os.path.getsize(path) < MIN_GEOJSON_SIZE_BYTES:
+        return False
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        return fh.read(20).strip().startswith("{")
+
+# Determine which path to use
+_geojson_path = None
+if _is_valid_geojson_file(GEOJSON):
+    _geojson_path = GEOJSON
+elif _is_valid_geojson_file(_BOUNDARY_CACHE):
+    print("Using cached admin-1 GeoJSON.")
+    _geojson_path = _BOUNDARY_CACHE
+else:
+    print("Downloading India admin-1 boundaries …")
+    try:
+        urllib.request.urlretrieve(_BOUNDARY_URL, _BOUNDARY_CACHE)
+        print(f"  Saved to {_BOUNDARY_CACHE}")
+        _geojson_path = _BOUNDARY_CACHE
+    except Exception as exc:
+        print(f"  Download failed ({exc}) – will use data-derived boundary.")
+
+if _geojson_path:
+    try:
+        india_gdf = gpd.read_file(_geojson_path)
+        if india_gdf.crs and india_gdf.crs.to_epsg() != 4326:
+            india_gdf = india_gdf.to_crs("EPSG:4326")
+        use_geojson = True
+        print(f"Loaded admin-1 GeoJSON: {len(india_gdf)} features, CRS={india_gdf.crs}")
+    except Exception as exc:
+        print(f"Could not read admin-1 GeoJSON ({exc}) – using data-derived boundary.")
+
+# Build country geometry when available. Raster clipping to this geometry
+# is applied at draw time for exact boundary coincidence.
+if use_geojson and india_gdf is not None:
+    try:
+        country_geom = india_gdf.union_all()
+    except AttributeError:
+        country_geom = india_gdf.geometry.unary_union
+else:
+    pm25_plot = np.where(land_mask, pm25_plot, np.nan)
+
+def _geometry_to_path(geom):
+    """Convert shapely (Multi)Polygon geometry to a matplotlib Path."""
+    polygons = []
+    if isinstance(geom, Polygon):
+        polygons = [geom]
+    elif isinstance(geom, MultiPolygon):
+        polygons = list(geom.geoms)
+    elif isinstance(geom, GeometryCollection):
+        for g in geom.geoms:
+            if isinstance(g, Polygon):
+                polygons.append(g)
+            elif isinstance(g, MultiPolygon):
+                polygons.extend(list(g.geoms))
+
+    if not polygons:
+        return None
+
+    vertices = []
+    codes = []
+    for poly in polygons:
+        for ring in [poly.exterior, *poly.interiors]:
+            coords = np.asarray(ring.coords, dtype=float)
+            if coords.shape[0] < 3:
+                continue
+            vertices.extend(coords.tolist())
+            codes.extend([Path.MOVETO] + [Path.LINETO] * (coords.shape[0] - 2) + [Path.CLOSEPOLY])
+
+    if not vertices:
+        return None
+    return Path(np.asarray(vertices, dtype=float), codes)
+
+# ---------------------------------------------------------------------------
+# 5. Plot
+# ---------------------------------------------------------------------------
+print("Rendering map …")
+
+fig, ax = plt.subplots(figsize=(12, 9), dpi=300)
+fig.patch.set_facecolor("white")
+ax.set_facecolor("#ddeeff")          # light ocean colour
+
+# --- PM2.5 heatmap ---
+mesh = ax.imshow(
+    pm25_plot,
+    origin="lower",
+    extent=[lon.min(), lon.max(), lat.min(), lat.max()],
+    cmap=cmap, norm=norm,
+    interpolation="bicubic",
+    zorder=2,
+    aspect="auto",
+)
+if country_geom is not None:
+    country_path = _geometry_to_path(country_geom)
+    if country_path is not None:
+        mesh.set_clip_path(country_path, ax.transData)
+
+# --- Boundaries ---
+if use_geojson and india_gdf is not None:
+    # Draw only higher-level administrative boundaries (no district/county lines)
+    # as a single merged layer for visually consistent state boundary strokes.
+    try:
+        linework = india_gdf.boundary.union_all()
+        linework = linework.simplify(BOUNDARY_SIMPLIFY_TOL, preserve_topology=True)
+        gpd.GeoSeries([linework], crs="EPSG:4326").plot(
+            ax=ax, linewidth=BOUNDARY_LINEWIDTH, color=BOUNDARY_COLOR, alpha=BOUNDARY_ALPHA, zorder=4
+        )
+    except AttributeError:
+        # older geopandas compatibility
+        linework = india_gdf.boundary.unary_union
+        linework = linework.simplify(BOUNDARY_SIMPLIFY_TOL, preserve_topology=True)
+        gpd.GeoSeries([linework], crs="EPSG:4326").plot(
+            ax=ax, linewidth=BOUNDARY_LINEWIDTH, color=BOUNDARY_COLOR, alpha=BOUNDARY_ALPHA, zorder=4
+        )
+else:
+    # Draw boundary derived from the land mask using contour at 0.5
+    # (binary mask: 1 = land, 0 = ocean)
+    _mask_float = land_mask.astype(float)
+    _mask_smooth = gaussian_filter(_mask_float, sigma=1.0)
+    ax.contour(
+        LON2, LAT2, _mask_smooth,
+        levels=[0.5],
+        colors=["#111111"], linewidths=[1.0], zorder=5
+    )
+
+# --- Map extent & ticks ---
+ax.set_xlim(lon.min() - 0.5, lon.max() + 0.5)
+ax.set_ylim(lat.min() - 0.5, lat.max() + 0.5)
+
+ax.xaxis.set_major_locator(MultipleLocator(5))
+ax.yaxis.set_major_locator(MultipleLocator(5))
+ax.xaxis.set_minor_locator(MultipleLocator(1))
+ax.yaxis.set_minor_locator(MultipleLocator(1))
+
+ax.set_xlabel("Longitude (°E)", fontsize=11, labelpad=6)
+ax.set_ylabel("Latitude (°N)",  fontsize=11, labelpad=6)
+
+ax.tick_params(axis="both", which="major", labelsize=9,
+               direction="in", length=5, width=0.8)
+ax.tick_params(axis="both", which="minor",
+               direction="in", length=3, width=0.5)
+
+# Format tick labels with °E / °N
+def fmt_lon(x, _):
+    return f"{x:.0f}°E"
+
+def fmt_lat(x, _):
+    return f"{x:.0f}°N"
+
+ax.xaxis.set_major_formatter(ticker.FuncFormatter(fmt_lon))
+ax.yaxis.set_major_formatter(ticker.FuncFormatter(fmt_lat))
+
+for spine in ax.spines.values():
+    spine.set_linewidth(0.8)
+
+# --- Color bar (horizontal, below map – matching reference style) ---
+cbar = fig.colorbar(
+    mesh, ax=ax,
+    orientation="horizontal",
+    fraction=0.04, pad=0.08,
+    extend="max",
+    aspect=40,
+)
+cbar.set_label("2–3月平均 PM2.5 (μg/m³)", fontsize=11, labelpad=6)
+cbar.ax.tick_params(labelsize=9)
+# Ticks at 0, 10, 20, … 100; the 0–80 segment follows the requested palette
+cbar_ticks = list(range(0, VMAX + 1, 10))
+cbar.set_ticks(cbar_ticks)
+cbar.ax.set_xticklabels([str(v) for v in cbar_ticks])
+
+# --- Title ---
+ax.set_title(
+    "2023年2–3月印度 PM2.5 空间分布图\n"
+    "(February – March 2023 Average)",
+    fontsize=14, fontweight="bold", pad=14
+)
+
+# ---------------------------------------------------------------------------
+# 6. Save
+# ---------------------------------------------------------------------------
+plt.tight_layout()
+fig.savefig(OUTPUT, dpi=300, bbox_inches="tight", facecolor=fig.get_facecolor())
+plt.close(fig)
+print(f"Saved → {OUTPUT}")
