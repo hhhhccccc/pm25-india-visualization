@@ -3,8 +3,8 @@ PM2.5 Spatial Distribution Heatmap for India (February–March 2023)
 ===================================================================
 Reads two monthly NetCDF files, computes the Feb–Mar average, applies
 linear and nearest-neighbor spatial interpolation to fill minor gaps,
-and produces a publication-quality PNG with India district boundaries
-overlaid.
+and produces a publication-quality PNG with higher-level India
+administrative boundaries overlaid.
 
 Output: pm25_india_feb_mar_2023.png
 """
@@ -51,7 +51,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 NC_FEB = os.path.join(SCRIPT_DIR, "India_202302-202302.nc")
 NC_MAR = os.path.join(SCRIPT_DIR, "India_202303-202303.nc")
-GEOJSON = os.path.join(SCRIPT_DIR, "INDIA_INDIA_DISTRICTS.geojson")
+GEOJSON = os.path.join(SCRIPT_DIR, "INDIA_INDIA_STATES.geojson")
 OUTPUT  = os.path.join(SCRIPT_DIR, "pm25_india_feb_mar_2023.png")
 
 # ---------------------------------------------------------------------------
@@ -130,17 +130,17 @@ BOUNDARY_LINEWIDTH = 0.10
 BOUNDARY_COLOR = "#222222"
 BOUNDARY_ALPHA = 0.70
 # Geometry simplification tolerance in degrees (~2 km) to reduce visual clutter
-# while preserving city-level boundary shapes at this map scale.
+# while preserving overall boundary shapes at this map scale.
 BOUNDARY_SIMPLIFY_TOL = 0.02
 
 # ---------------------------------------------------------------------------
-# 4. Load district boundaries (GeoJSON) – download from public source if local
+# 4. Load higher-level admin boundaries (GeoJSON) – download from public source if local
 #    file is a placeholder (< 10 kB); cache to /tmp to avoid repeated downloads
 # ---------------------------------------------------------------------------
-# Public source: GADM-based India district polygons (594 districts, WGS-84)
-_DISTRICT_URL   = ("https://raw.githubusercontent.com/geohacker/india/"
-                   "master/district/india_district.geojson")
-_DISTRICT_CACHE = "/tmp/india_districts_cache.geojson"
+# Public source: GADM-based India state polygons (admin-1, WGS-84)
+_BOUNDARY_URL   = ("https://raw.githubusercontent.com/geohacker/india/"
+                   "master/state/india_state.geojson")
+_BOUNDARY_CACHE = "/tmp/india_admin1_cache.geojson"
 
 india_gdf   = None
 use_geojson = False
@@ -158,15 +158,15 @@ def _is_real_geojson(path):
 _geojson_path = None
 if _is_real_geojson(GEOJSON):
     _geojson_path = GEOJSON
-elif _is_real_geojson(_DISTRICT_CACHE):
-    print("Using cached district GeoJSON.")
-    _geojson_path = _DISTRICT_CACHE
+elif _is_real_geojson(_BOUNDARY_CACHE):
+    print("Using cached admin-1 GeoJSON.")
+    _geojson_path = _BOUNDARY_CACHE
 else:
-    print("Downloading India district boundaries …")
+    print("Downloading India admin-1 boundaries …")
     try:
-        urllib.request.urlretrieve(_DISTRICT_URL, _DISTRICT_CACHE)
-        print(f"  Saved to {_DISTRICT_CACHE}")
-        _geojson_path = _DISTRICT_CACHE
+        urllib.request.urlretrieve(_BOUNDARY_URL, _BOUNDARY_CACHE)
+        print(f"  Saved to {_BOUNDARY_CACHE}")
+        _geojson_path = _BOUNDARY_CACHE
     except Exception as exc:
         print(f"  Download failed ({exc}) – will use data-derived boundary.")
 
@@ -176,9 +176,9 @@ if _geojson_path:
         if india_gdf.crs and india_gdf.crs.to_epsg() != 4326:
             india_gdf = india_gdf.to_crs("EPSG:4326")
         use_geojson = True
-        print(f"Loaded district GeoJSON: {len(india_gdf)} districts, CRS={india_gdf.crs}")
+        print(f"Loaded admin-1 GeoJSON: {len(india_gdf)} features, CRS={india_gdf.crs}")
     except Exception as exc:
-        print(f"Could not read district GeoJSON ({exc}) – using data-derived boundary.")
+        print(f"Could not read admin-1 GeoJSON ({exc}) – using data-derived boundary.")
 
 # Build final plot mask from country geometry when available to avoid
 # white gaps between raster color and boundary line.
@@ -218,10 +218,8 @@ mesh = ax.pcolormesh(
 
 # --- Boundaries ---
 if use_geojson and india_gdf is not None:
-    # Draw only admin-2 (city/county-level) boundaries as a single merged layer
-    # to avoid mixed thick/thin appearance caused by overlapping segments.
-    # Simplify linework slightly to reduce visual clutter while preserving
-    # city-level boundaries.
+    # Draw only higher-level administrative boundaries (no district/county lines)
+    # as a single merged layer to avoid mixed thick/thin overlapping segments.
     try:
         linework = india_gdf.boundary.union_all()
         linework = linework.simplify(BOUNDARY_SIMPLIFY_TOL, preserve_topology=True)
