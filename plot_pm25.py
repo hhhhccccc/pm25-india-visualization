@@ -19,13 +19,14 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.ticker as ticker
+from matplotlib.path import Path
 from matplotlib.ticker import MultipleLocator
 import matplotlib.font_manager as fm
 import xarray as xr
 import geopandas as gpd
 from scipy.ndimage import gaussian_filter
 from scipy.interpolate import griddata
-from shapely import contains_xy
+from shapely.geometry import Polygon, MultiPolygon, GeometryCollection
 
 warnings.filterwarnings("ignore")
 
@@ -147,6 +148,7 @@ MIN_GEOJSON_SIZE_BYTES = 10_000
 
 india_gdf   = None
 use_geojson = False
+country_geom = None
 
 def _is_valid_geojson_file(path):
     """Return True only if the file looks like a real GeoJSON (≥ 10 kB, starts with '{')."""
@@ -183,19 +185,46 @@ if _geojson_path:
     except Exception as exc:
         print(f"Could not read admin-1 GeoJSON ({exc}) – using data-derived boundary.")
 
-# Build final plot mask from country geometry when available to avoid
-# white gaps between raster color and boundary line.
+# Build country geometry when available. Raster clipping to this geometry
+# is applied at draw time for exact boundary coincidence.
 if use_geojson and india_gdf is not None:
     try:
         country_geom = india_gdf.union_all()
     except AttributeError:
         country_geom = india_gdf.geometry.unary_union
-
-    country_mask = contains_xy(country_geom, LON2, LAT2)
 else:
-    country_mask = land_mask
+    pm25_plot = np.where(land_mask, pm25_plot, np.nan)
 
-pm25_plot = np.where(country_mask, pm25_plot, np.nan)
+def _geometry_to_path(geom):
+    """Convert shapely (Multi)Polygon geometry to a matplotlib Path."""
+    polygons = []
+    if isinstance(geom, Polygon):
+        polygons = [geom]
+    elif isinstance(geom, MultiPolygon):
+        polygons = list(geom.geoms)
+    elif isinstance(geom, GeometryCollection):
+        for g in geom.geoms:
+            if isinstance(g, Polygon):
+                polygons.append(g)
+            elif isinstance(g, MultiPolygon):
+                polygons.extend(list(g.geoms))
+
+    if not polygons:
+        return None
+
+    vertices = []
+    codes = []
+    for poly in polygons:
+        for ring in [poly.exterior, *poly.interiors]:
+            coords = np.asarray(ring.coords, dtype=float)
+            if coords.shape[0] < 3:
+                continue
+            vertices.extend(coords.tolist())
+            codes.extend([Path.MOVETO] + [Path.LINETO] * (coords.shape[0] - 2) + [Path.CLOSEPOLY])
+
+    if not vertices:
+        return None
+    return Path(np.asarray(vertices, dtype=float), codes)
 
 # ---------------------------------------------------------------------------
 # 5. Plot
@@ -212,6 +241,10 @@ mesh = ax.pcolormesh(
     cmap=cmap, norm=norm,
     shading="gouraud", zorder=2
 )
+if country_geom is not None:
+    country_path = _geometry_to_path(country_geom)
+    if country_path is not None:
+        mesh.set_clip_path(country_path, ax.transData)
 
 # --- Boundaries ---
 if use_geojson and india_gdf is not None:
