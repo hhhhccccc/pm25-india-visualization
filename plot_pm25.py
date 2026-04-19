@@ -118,29 +118,27 @@ pm25_smooth = gaussian_filter(pm25_interp, sigma=1.5)
 pm25_plot = pm25_smooth.copy()
 
 # ---------------------------------------------------------------------------
-# 3. Color map – preserve reference 0–80 colors, extend to >100
+# 3. Color map – use requested 0–80 colors, extend to 100
 # ---------------------------------------------------------------------------
-VMIN, VMID, VMAX = 0, 80, 120   # μg/m³
+VMIN, VMID, VMAX = 0, 80, 100   # μg/m³
 
-# Explicit 0–80 reference palette (blue→cyan→green→yellow→orange→red).
-# This keeps the 0 color aligned with the user's reference bar.
-_vals_0_80 = np.array([0, 10, 20, 30, 40, 50, 60, 70, 80], dtype=float)
+# Explicit 0–80 reference palette provided by the user.
+_vals_0_80 = np.linspace(VMIN, VMID, 8, dtype=float)
 _pos_0_80 = _vals_0_80 / VMAX
 _cols_0_80 = [
-    "#2f5fff",  # 0
-    "#35b6f0",  # 10
-    "#34c8b3",  # 20
-    "#5ae05e",  # 30
-    "#9ceb48",  # 40
-    "#f1e34a",  # 50
-    "#f9b24a",  # 60
-    "#ff7a4a",  # 70
-    "#ff5a62",  # 80
+    "#2455ff",
+    "#2fc6ff",
+    "#26d7b3",
+    "#7ef24a",
+    "#fff04a",
+    "#ffb347",
+    "#ff7a45",
+    "#ff5b5b",
 ]
 
-_vals_hi = np.array([90, 100, 110, 120], dtype=float)
+_vals_hi = np.array([90, 100], dtype=float)
 _pos_hi = _vals_hi / VMAX
-_cols_hi = ["#d33a3a", "#a31f1f", "#6f1010", "#3f0606"]
+_cols_hi = ["#cc2f2f", "#8b0000"]
 
 cmap = mcolors.LinearSegmentedColormap.from_list(
     "pm25_extended",
