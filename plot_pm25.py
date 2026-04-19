@@ -125,7 +125,7 @@ VMIN, VMAX = 0, 80   # μg/m³ – same axis range as the reference China map
 cmap = plt.get_cmap("jet")
 norm = mcolors.Normalize(vmin=VMIN, vmax=VMAX)
 
-# Boundary style for city/district-level linework
+# Boundary style for admin-1 (state-level) linework
 BOUNDARY_LINEWIDTH = 0.10
 BOUNDARY_COLOR = "#222222"
 BOUNDARY_ALPHA = 0.70
@@ -220,7 +220,7 @@ mesh = ax.pcolormesh(
 # --- Boundaries ---
 if use_geojson and india_gdf is not None:
     # Draw only higher-level administrative boundaries (no district/county lines)
-    # as a single merged layer to avoid mixed thick/thin overlapping segments.
+    # as a single merged layer for visually consistent state boundary strokes.
     try:
         linework = india_gdf.boundary.union_all()
         linework = linework.simplify(BOUNDARY_SIMPLIFY_TOL, preserve_topology=True)
