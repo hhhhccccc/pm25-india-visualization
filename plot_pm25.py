@@ -126,12 +126,12 @@ cmap = plt.get_cmap("jet")
 norm = mcolors.Normalize(vmin=VMIN, vmax=VMAX)
 
 # Boundary style for admin-1 (state-level) linework
-BOUNDARY_LINEWIDTH = 0.10
-BOUNDARY_COLOR = "#222222"
-BOUNDARY_ALPHA = 0.70
+BOUNDARY_LINEWIDTH = 0.45
+BOUNDARY_COLOR = "#111111"
+BOUNDARY_ALPHA = 0.95
 # Geometry simplification tolerance in degrees (~2 km) to reduce visual clutter
 # while preserving overall boundary shapes at this map scale.
-BOUNDARY_SIMPLIFY_TOL = 0.02
+BOUNDARY_SIMPLIFY_TOL = 0.01
 
 # ---------------------------------------------------------------------------
 # 4. Load higher-level admin boundaries (GeoJSON) – download from public source if local
@@ -189,12 +189,6 @@ if use_geojson and india_gdf is not None:
     except AttributeError:
         country_geom = india_gdf.geometry.unary_union
 
-    # Expand by ~half grid cell so colored raster reaches the plotted boundary.
-    _dlat = float(np.median(np.diff(lat)))
-    _dlon = float(np.median(np.diff(lon)))
-    _buffer = 0.5 * np.hypot(_dlat, _dlon)
-    country_geom = country_geom.buffer(_buffer)
-
     country_mask = contains_xy(country_geom, LON2, LAT2)
 else:
     country_mask = land_mask
@@ -214,7 +208,7 @@ ax.set_facecolor("#ddeeff")          # light ocean colour
 mesh = ax.pcolormesh(
     LON2, LAT2, pm25_plot,
     cmap=cmap, norm=norm,
-    shading="auto", zorder=2
+    shading="gouraud", antialiased=True, zorder=2
 )
 
 # --- Boundaries ---
@@ -295,15 +289,6 @@ ax.set_title(
     "2023年2–3月印度 PM2.5 空间分布图\n"
     "(February – March 2023 Average)",
     fontsize=14, fontweight="bold", pad=14
-)
-
-# --- Annotation ---
-ax.text(
-    0.99, 0.01,
-    "Data: CHAP-V2  |  Resolution: 0.1°",
-    transform=ax.transAxes,
-    fontsize=6.5, color="#555555",
-    ha="right", va="bottom",
 )
 
 # ---------------------------------------------------------------------------
